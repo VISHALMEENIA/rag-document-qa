@@ -8,8 +8,6 @@ from langchain_community.vectorstores import FAISS
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
-
 
 # --------------------------------
 # PAGE CONFIG
@@ -26,33 +24,46 @@ st.write("Upload a PDF and ask questions about it.")
 
 # --------------------------------
 # LOAD LANGUAGE MODEL
-# Only loads when needed
 # --------------------------------
 
 @st.cache_resource
 def load_model():
 
+    # Import only when the model is actually needed
+    from transformers import (
+        AutoTokenizer,
+        AutoModelForSeq2SeqLM
+    )
+
     model_name = "google/flan-t5-small"
 
     with st.spinner("Loading AI model..."):
-        tokenizer = AutoTokenizer.from_pretrained(model_name)
-        model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_name
+        )
+
+        model = AutoModelForSeq2SeqLM.from_pretrained(
+            model_name
+        )
 
     return tokenizer, model
 
 
 # --------------------------------
 # LOAD EMBEDDING MODEL
-# Only loads when needed
 # --------------------------------
 
 @st.cache_resource
 def load_embeddings():
 
     with st.spinner("Loading embedding model..."):
-        return HuggingFaceEmbeddings(
+
+        embeddings = HuggingFaceEmbeddings(
             model_name="sentence-transformers/all-MiniLM-L6-v2"
         )
+
+    return embeddings
 
 
 # --------------------------------
@@ -66,24 +77,36 @@ uploaded_file = st.file_uploader(
 
 
 # --------------------------------
-# PROCESS PDF
+# MAIN APP
 # --------------------------------
 
-if uploaded_file is not None:
+if uploaded_file is None:
 
-    st.success(f"Uploaded: {uploaded_file.name}")
+    st.info("👆 Upload a PDF to get started.")
+
+else:
+
+    st.success(
+        f"Uploaded: {uploaded_file.name}"
+    )
 
     pdf_path = None
 
     try:
 
-        # Save uploaded PDF temporarily
+        # --------------------------------
+        # SAVE PDF TEMPORARILY
+        # --------------------------------
+
         with tempfile.NamedTemporaryFile(
             delete=False,
             suffix=".pdf"
         ) as temp_file:
 
-            temp_file.write(uploaded_file.getvalue())
+            temp_file.write(
+                uploaded_file.getvalue()
+            )
+
             pdf_path = temp_file.name
 
 
@@ -91,12 +114,15 @@ if uploaded_file is not None:
         # LOAD PDF
         # --------------------------------
 
-        with st.spinner("Reading PDF..."):
+        with st.spinner("📄 Reading PDF..."):
 
             loader = PyPDFLoader(pdf_path)
+
             documents = loader.load()
 
-        st.write(f"📄 Pages: {len(documents)}")
+        st.write(
+            f"📄 Pages: {len(documents)}"
+        )
 
 
         # --------------------------------
@@ -108,34 +134,42 @@ if uploaded_file is not None:
             chunk_overlap=200
         )
 
-        chunks = text_splitter.split_documents(documents)
+        chunks = text_splitter.split_documents(
+            documents
+        )
 
-        st.write(f"✂️ Chunks: {len(chunks)}")
+        st.write(
+            f"✂️ Chunks: {len(chunks)}"
+        )
 
 
         # --------------------------------
-        # LOAD EMBEDDINGS
+        # CREATE EMBEDDINGS
         # --------------------------------
 
         embeddings = load_embeddings()
 
 
         # --------------------------------
-        # CREATE FAISS DATABASE
+        # CREATE FAISS VECTOR DATABASE
         # --------------------------------
 
-        with st.spinner("Creating document index..."):
+        with st.spinner(
+            "🔎 Creating document index..."
+        ):
 
             vectorstore = FAISS.from_documents(
                 chunks,
                 embeddings
             )
 
-        st.success("✅ Document processed successfully!")
+        st.success(
+            "✅ Document processed successfully!"
+        )
 
 
         # --------------------------------
-        # QUESTION
+        # QUESTION INPUT
         # --------------------------------
 
         question = st.text_input(
@@ -143,11 +177,17 @@ if uploaded_file is not None:
         )
 
 
+        # --------------------------------
+        # ASK BUTTON
+        # --------------------------------
+
         if st.button("Ask"):
 
             if not question.strip():
 
-                st.warning("Please enter a question.")
+                st.warning(
+                    "Please enter a question."
+                )
 
             else:
 
@@ -155,7 +195,9 @@ if uploaded_file is not None:
                 # SEARCH DOCUMENT
                 # --------------------------------
 
-                with st.spinner("Searching document..."):
+                with st.spinner(
+                    "🔍 Searching document..."
+                ):
 
                     results = vectorstore.similarity_search(
                         question,
@@ -164,7 +206,7 @@ if uploaded_file is not None:
 
 
                 # --------------------------------
-                # COMBINE CONTEXT
+                # CREATE CONTEXT
                 # --------------------------------
 
                 context = "\n\n".join(
@@ -185,14 +227,17 @@ Question:
 {question}
 
 Answer the question using only the information
-from the context.
+given in the context.
+
+If the answer is not present in the context,
+say: "The answer is not available in the document."
 
 Give a clear and complete answer.
 """
 
 
                 # --------------------------------
-                # LOAD LANGUAGE MODEL
+                # LOAD AI MODEL
                 # --------------------------------
 
                 tokenizer, model = load_model()
@@ -202,7 +247,9 @@ Give a clear and complete answer.
                 # GENERATE ANSWER
                 # --------------------------------
 
-                with st.spinner("Generating answer..."):
+                with st.spinner(
+                    "🤖 Generating answer..."
+                ):
 
                     inputs = tokenizer(
                         prompt,
@@ -236,41 +283,53 @@ Give a clear and complete answer.
                 # SHOW SOURCES
                 # --------------------------------
 
-                with st.expander("📖 View retrieved sources"):
+                with st.expander(
+                    "📖 View retrieved sources"
+                ):
 
-                    for i, doc in enumerate(results, 1):
+                    for i, doc in enumerate(
+                        results,
+                        1
+                    ):
 
-                        page_number = doc.metadata.get(
-                            "page",
-                            "Unknown"
+                        page_number = (
+                            doc.metadata.get(
+                                "page",
+                                "Unknown"
+                            )
                         )
 
                         st.write(
-                            f"**Source {i} — Page "
-                            f"{page_number}**"
+                            f"**Source {i} — "
+                            f"Page {page_number}**"
                         )
 
-                        st.write(doc.page_content)
+                        st.write(
+                            doc.page_content
+                        )
 
 
     except Exception as e:
 
-        st.error("❌ Something went wrong.")
+        st.error(
+            "❌ Something went wrong."
+        )
 
         st.exception(e)
 
 
     finally:
 
-        # Remove temporary PDF
+        # --------------------------------
+        # DELETE TEMPORARY PDF
+        # --------------------------------
+
         if pdf_path is not None:
 
             try:
+
                 os.remove(pdf_path)
+
             except Exception:
+
                 pass
-
-
-else:
-
-    st.info("👆 Upload a PDF to get started.")
