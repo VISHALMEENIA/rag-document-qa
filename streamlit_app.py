@@ -29,7 +29,7 @@ st.write("Upload a PDF and ask questions about it.")
 @st.cache_resource
 def load_model():
 
-    model_name = "google/flan-t5-base"
+    model_name = "google/flan-t5-small"
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
