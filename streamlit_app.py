@@ -49,8 +49,8 @@ def load_embeddings():
     )
 
 
-#tokenizer, model = load_model()
-#embeddings = load_embeddings()
+tokenizer, model = load_model()
+embeddings = load_embeddings()
 
 
 # --------------------------------
