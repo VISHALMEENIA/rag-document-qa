@@ -8,32 +8,59 @@ from langchain_community.vectorstores import FAISS
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 
-# --------------------------------
+
+# ============================================================
 # PAGE CONFIG
-# --------------------------------
+# ============================================================
 
 st.set_page_config(
     page_title="RAG Document Q&A",
-    page_icon="📚"
+    page_icon="📚",
+    layout="wide"
 )
 
 st.title("📚 RAG Document Q&A")
 st.write("Upload a PDF and ask questions about it.")
 
 
-# --------------------------------
+# ============================================================
+# SESSION STATE
+# ============================================================
+
+if "vectorstore" not in st.session_state:
+    st.session_state.vectorstore = None
+
+if "uploaded_file_name" not in st.session_state:
+    st.session_state.uploaded_file_name = None
+
+if "pdf_processed" not in st.session_state:
+    st.session_state.pdf_processed = False
+
+
+# ============================================================
+# LOAD EMBEDDING MODEL
+# ============================================================
+
+@st.cache_resource
+def load_embeddings():
+
+    with st.spinner("Loading embedding model..."):
+
+        embeddings = HuggingFaceEmbeddings(
+            model_name="sentence-transformers/all-MiniLM-L6-v2"
+        )
+
+    return embeddings
+
+
+# ============================================================
 # LOAD LANGUAGE MODEL
-# --------------------------------
+# ============================================================
 
 @st.cache_resource
 def load_model():
-
-    # Import only when the model is actually needed
-    from transformers import (
-        AutoTokenizer,
-        AutoModelForSeq2SeqLM
-    )
 
     model_name = "google/flan-t5-small"
 
@@ -50,53 +77,19 @@ def load_model():
     return tokenizer, model
 
 
-# --------------------------------
-# LOAD EMBEDDING MODEL
-# --------------------------------
+# ============================================================
+# PROCESS PDF FUNCTION
+# ============================================================
 
-@st.cache_resource
-def load_embeddings():
-
-    with st.spinner("Loading embedding model..."):
-
-        embeddings = HuggingFaceEmbeddings(
-            model_name="sentence-transformers/all-MiniLM-L6-v2"
-        )
-
-    return embeddings
-
-
-# --------------------------------
-# PDF UPLOAD
-# --------------------------------
-
-uploaded_file = st.file_uploader(
-    "Upload your PDF",
-    type=["pdf"]
-)
-
-
-# --------------------------------
-# MAIN APP
-# --------------------------------
-
-if uploaded_file is None:
-
-    st.info("👆 Upload a PDF to get started.")
-
-else:
-
-    st.success(
-        f"Uploaded: {uploaded_file.name}"
-    )
+def process_pdf(uploaded_file):
 
     pdf_path = None
 
     try:
 
-        # --------------------------------
-        # SAVE PDF TEMPORARILY
-        # --------------------------------
+        # ----------------------------------------------------
+        # Save PDF temporarily
+        # ----------------------------------------------------
 
         with tempfile.NamedTemporaryFile(
             delete=False,
@@ -110,52 +103,55 @@ else:
             pdf_path = temp_file.name
 
 
-        # --------------------------------
-        # LOAD PDF
-        # --------------------------------
+        # ----------------------------------------------------
+        # Load PDF
+        # ----------------------------------------------------
 
-        with st.spinner("📄 Reading PDF..."):
+        with st.spinner("📖 Reading PDF..."):
 
             loader = PyPDFLoader(pdf_path)
 
             documents = loader.load()
 
-        st.write(
-            f"📄 Pages: {len(documents)}"
+        st.success(
+            f"📄 PDF loaded successfully! "
+            f"Pages: {len(documents)}"
         )
 
 
-        # --------------------------------
-        # SPLIT DOCUMENT
-        # --------------------------------
+        # ----------------------------------------------------
+        # Split PDF
+        # ----------------------------------------------------
 
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000,
-            chunk_overlap=200
+        with st.spinner("✂️ Splitting document..."):
+
+            text_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=1000,
+                chunk_overlap=200
+            )
+
+            chunks = text_splitter.split_documents(
+                documents
+            )
+
+        st.info(
+            f"🧩 Number of chunks: {len(chunks)}"
         )
 
-        chunks = text_splitter.split_documents(
-            documents
-        )
 
-        st.write(
-            f"✂️ Chunks: {len(chunks)}"
-        )
-
-
-        # --------------------------------
-        # CREATE EMBEDDINGS
-        # --------------------------------
+        # ----------------------------------------------------
+        # Load embeddings
+        # ----------------------------------------------------
 
         embeddings = load_embeddings()
 
 
-        # --------------------------------
-        # CREATE FAISS VECTOR DATABASE
-        # --------------------------------
+        # ----------------------------------------------------
+        # Create FAISS vector database
+        # ----------------------------------------------------
 
         with st.spinner(
-            "🔎 Creating document index..."
+            "🔎 Creating FAISS vector database..."
         ):
 
             vectorstore = FAISS.from_documents(
@@ -164,172 +160,294 @@ else:
             )
 
         st.success(
-            "✅ Document processed successfully!"
+            "✅ FAISS vector database created successfully!"
+        )
+
+        return vectorstore
+
+
+    finally:
+
+        # ----------------------------------------------------
+        # Delete temporary PDF
+        # ----------------------------------------------------
+
+        if pdf_path is not None:
+
+            try:
+                os.remove(pdf_path)
+
+            except Exception:
+                pass
+
+
+# ============================================================
+# PDF UPLOAD
+# ============================================================
+
+uploaded_file = st.file_uploader(
+    "📤 Upload your PDF",
+    type=["pdf"]
+)
+
+
+# ============================================================
+# PROCESS UPLOADED PDF
+# ============================================================
+
+if uploaded_file is not None:
+
+    # Check whether a new PDF was uploaded
+    if (
+        st.session_state.uploaded_file_name
+        != uploaded_file.name
+    ):
+
+        st.session_state.vectorstore = None
+        st.session_state.pdf_processed = False
+
+        st.session_state.uploaded_file_name = (
+            uploaded_file.name
         )
 
 
-        # --------------------------------
-        # QUESTION INPUT
-        # --------------------------------
+    st.success(
+        f"📎 Uploaded: {uploaded_file.name}"
+    )
+
+
+    # --------------------------------------------------------
+    # Process only once
+    # --------------------------------------------------------
+
+    if not st.session_state.pdf_processed:
+
+        try:
+
+            vectorstore = process_pdf(
+                uploaded_file
+            )
+
+            st.session_state.vectorstore = (
+                vectorstore
+            )
+
+            st.session_state.pdf_processed = True
+
+        except Exception as e:
+
+            st.error(
+                "❌ Error while processing PDF"
+            )
+
+            st.exception(e)
+
+
+    # ========================================================
+    # QUESTION SECTION
+    # ========================================================
+
+    if st.session_state.vectorstore is not None:
+
+        st.divider()
+
+        st.subheader(
+            "💬 Ask a question about the PDF"
+        )
+
 
         question = st.text_input(
-            "Ask a question about the PDF:"
+            "Enter your question:",
+            placeholder="Example: What is Data Science?"
         )
 
 
-        # --------------------------------
-        # ASK BUTTON
-        # --------------------------------
+        ask_button = st.button(
+            "🔍 Ask Question",
+            type="primary"
+        )
 
-        if st.button("Ask"):
+
+        # ====================================================
+        # ASK QUESTION
+        # ====================================================
+
+        if ask_button:
 
             if not question.strip():
 
                 st.warning(
-                    "Please enter a question."
+                    "⚠️ Please enter a question."
                 )
 
             else:
 
-                # --------------------------------
-                # SEARCH DOCUMENT
-                # --------------------------------
+                try:
 
-                with st.spinner(
-                    "🔍 Searching document..."
-                ):
+                    # ----------------------------------------
+                    # Similarity Search
+                    # ----------------------------------------
 
-                    results = vectorstore.similarity_search(
-                        question,
-                        k=3
-                    )
+                    with st.spinner(
+                        "🔎 Searching document..."
+                    ):
 
-
-                # --------------------------------
-                # CREATE CONTEXT
-                # --------------------------------
-
-                context = "\n\n".join(
-                    doc.page_content
-                    for doc in results
-                )
+                        results = (
+                            st.session_state
+                            .vectorstore
+                            .similarity_search(
+                                question,
+                                k=3
+                            )
+                        )
 
 
-                # --------------------------------
-                # PROMPT
-                # --------------------------------
+                    if not results:
 
-                prompt = f"""
+                        st.warning(
+                            "No relevant information "
+                            "was found in the PDF."
+                        )
+
+                    else:
+
+                        # ------------------------------------
+                        # Create context
+                        # ------------------------------------
+
+                        context = "\n\n".join(
+                            doc.page_content
+                            for doc in results
+                        )
+
+
+                        # ------------------------------------
+                        # Prompt
+                        # ------------------------------------
+
+                        prompt = f"""
+Answer the question using ONLY the information
+provided in the context.
+
+If the answer is not present in the context,
+say: "The answer is not available in the document."
+
 Context:
 {context}
 
 Question:
 {question}
 
-Answer the question using only the information
-given in the context.
-
-If the answer is not present in the context,
-say: "The answer is not available in the document."
-
-Give a clear and complete answer.
+Answer:
 """
 
 
-                # --------------------------------
-                # LOAD AI MODEL
-                # --------------------------------
+                        # ------------------------------------
+                        # Load model
+                        # ------------------------------------
 
-                tokenizer, model = load_model()
-
-
-                # --------------------------------
-                # GENERATE ANSWER
-                # --------------------------------
-
-                with st.spinner(
-                    "🤖 Generating answer..."
-                ):
-
-                    inputs = tokenizer(
-                        prompt,
-                        return_tensors="pt",
-                        truncation=True,
-                        max_length=512
-                    )
-
-                    outputs = model.generate(
-                        **inputs,
-                        max_new_tokens=150,
-                        num_beams=4
-                    )
-
-                    answer = tokenizer.decode(
-                        outputs[0],
-                        skip_special_tokens=True
-                    )
+                        tokenizer, model = load_model()
 
 
-                # --------------------------------
-                # DISPLAY ANSWER
-                # --------------------------------
+                        # ------------------------------------
+                        # Tokenize
+                        # ------------------------------------
 
-                st.subheader("💡 Answer")
+                        with st.spinner(
+                            "🤖 Generating answer..."
+                        ):
 
-                st.write(answer)
-
-
-                # --------------------------------
-                # SHOW SOURCES
-                # --------------------------------
-
-                with st.expander(
-                    "📖 View retrieved sources"
-                ):
-
-                    for i, doc in enumerate(
-                        results,
-                        1
-                    ):
-
-                        page_number = (
-                            doc.metadata.get(
-                                "page",
-                                "Unknown"
+                            inputs = tokenizer(
+                                prompt,
+                                return_tensors="pt",
+                                truncation=True,
+                                max_length=512
                             )
+
+
+                            # --------------------------------
+                            # Generate
+                            # --------------------------------
+
+                            outputs = model.generate(
+                                **inputs,
+                                max_new_tokens=150,
+                                num_beams=4,
+                                early_stopping=True
+                            )
+
+
+                            answer = tokenizer.decode(
+                                outputs[0],
+                                skip_special_tokens=True
+                            )
+
+
+                        # ------------------------------------
+                        # Display Answer
+                        # ------------------------------------
+
+                        st.subheader(
+                            "💡 Answer"
                         )
 
-                        st.write(
-                            f"**Source {i} — "
-                            f"Page {page_number}**"
-                        )
-
-                        st.write(
-                            doc.page_content
-                        )
+                        st.write(answer)
 
 
-    except Exception as e:
+                        # ------------------------------------
+                        # Sources
+                        # ------------------------------------
 
-        st.error(
-            "❌ Something went wrong."
-        )
+                        st.divider()
 
-        st.exception(e)
+                        with st.expander(
+                            "📖 View retrieved sources"
+                        ):
+
+                            for i, doc in enumerate(
+                                results,
+                                start=1
+                            ):
+
+                                page_number = (
+                                    doc.metadata.get(
+                                        "page",
+                                        "Unknown"
+                                    )
+                                )
+
+                                # PDF pages are zero-indexed
+                                if isinstance(
+                                    page_number,
+                                    int
+                                ):
+
+                                    page_number += 1
 
 
-    finally:
+                                st.markdown(
+                                    f"### Source {i} "
+                                    f"— Page {page_number}"
+                                )
 
-        # --------------------------------
-        # DELETE TEMPORARY PDF
-        # --------------------------------
+                                st.write(
+                                    doc.page_content
+                                )
 
-        if pdf_path is not None:
+                                st.divider()
 
-            try:
 
-                os.remove(pdf_path)
+                except Exception as e:
 
-            except Exception:
+                    st.error(
+                        "❌ Error while answering question."
+                    )
 
-                pass
+                    st.exception(e)
+
+
+else:
+
+    st.info(
+        "👆 Upload a PDF to get started."
+    )
